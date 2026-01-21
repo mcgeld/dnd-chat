@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# Config
+TARGET="/home/malcolm/projects/dnd-chat-live"
+GIT_DIR="/home/malcolm/projects/dnd-chat.git"
+BRANCH="main"
+CLIENT_DIR="/home/malcolm/projects/dnd-chat-live/client"
+NGINX_DEPLOY_DIR="/var/www/websites/dnd/chat"
+API_SERVICE="dnd-chat-api"
+VENV="$TARGET/venv"
+
+while read oldrev newrev ref
+do
+  if [[ "$ref" = "refs/heads/$BRANCH" ]]; then
+    echo "📦 Deploying $BRANCH to $TARGET..."
+
+    git --work-tree="$TARGET" --git-dir="$GIT_DIR" checkout -f "$BRANCH"
+
+    echo "📦 Installing dependencies..."
+    cd "$CLIENT_DIR"
+    npm install
+
+    echo "🛠️ Building frontend..."
+    npm run build
+
+    echo "🚚 Copying build to Nginx folder..."
+    sudo rm -rf "$NGINX_DEPLOY_DIR"/*
+    sudo cp -r dist/* "$NGINX_DEPLOY_DIR/"
+
+    echo "🗄️  Running database migrations..."
+    cd ../
+    if [ -d "data/scripts" ]; then
+      if [ -f "data/scripts/run_scripts.py" ]; then
+        source "$VENV/bin/activate"
+        cd data/
+        python scripts/run_scripts.py
+        deactivate
+      else
+        echo "⚠️  No run_scripts.py found, skipping migrations."
+      fi
+    else
+      echo "⚠️  No scripts directory found, skipping migrations."
+    fi
+
+    echo "🔄 Restarting FastAPI backend ($API_SERVICE)..."
+    sudo systemctl restart "$API_SERVICE"
+
+    echo "✅ Deploy complete."
+  fi
+done
